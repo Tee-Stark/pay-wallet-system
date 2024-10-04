@@ -11,5 +11,5 @@ type IThirdPartyService interface {
 type IWalletService interface {
 	CreditWallet(payment *domain.Payment) (*domain.Wallet, error)
 	DebitWallet(payment *domain.Payment) (*domain.Wallet, error)
-	HandleTransaction(payment *domain.Payment) (*domain.PaymentDTO, error)
+	HandleTransaction(payment *domain.PaymentDTO) (*domain.PaymentDTO, error)
 }

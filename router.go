@@ -1,14 +1,17 @@
 package main
 
 import (
-	"github.com/gorilla/mux"
 	"pay-system/rest"
+
+	"github.com/gorilla/mux"
 )
 
-func SetupRoutes(app *App) {
+func SetupRoutes(app *App) *mux.Router {
 	router := mux.NewRouter()
 
 	ctrl := rest.NewWalletCtrl(app.WalletSvc)
 
-	router.HandlerFunc("/transaction", ctrl.HandleTransaction).methods("POST")
+	router.HandleFunc("/transaction", ctrl.HandleTransaction).Methods("POST")
+
+	return router
 }

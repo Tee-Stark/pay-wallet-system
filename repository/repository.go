@@ -35,7 +35,7 @@ func (r *PostgresRepo) GetPayment(id string) (*domain.Payment, error) {
 }
 
 func (r *PostgresRepo) CreatePayment(p *domain.Payment, tx *gorm.DB) (*domain.Payment, error) {
-	var newPayment *domain.Payment
+	var newPayment domain.Payment
 
 	p.ID = utils.GenerateRef()
 	p.Status = domain.PaymentStatusPending
@@ -51,12 +51,12 @@ func (r *PostgresRepo) CreatePayment(p *domain.Payment, tx *gorm.DB) (*domain.Pa
 	if err != nil {
 		return nil, err
 	}
-	return newPayment, nil
+	return &newPayment, nil
 }
 
 func (r *PostgresRepo) UpdatePayment(p *domain.Payment, tx *gorm.DB) (*domain.Payment, error) {
 	var db *gorm.DB
-	var updated *domain.Payment
+	var updated domain.Payment
 
 	if tx != nil {
 		db = tx
@@ -64,14 +64,15 @@ func (r *PostgresRepo) UpdatePayment(p *domain.Payment, tx *gorm.DB) (*domain.Pa
 		db = r.db
 	}
 	query := `
-	UPDATE payments WHERE reference = ? SET status = ?
+	UPDATE payments SET status = ?
+	WHERE id = ?
 	RETURNING *
 	`
-	err := db.Raw(query, p.ID, p.Status).Scan(updated).Error
+	err := db.Raw(query, p.Status, p.ID).Scan(&updated).Error
 	if err != nil {
 		return nil, err
 	}
-	return updated, nil
+	return &updated, nil
 }
 
 func (r *PostgresRepo) GetWallet(userID string, tx *gorm.DB) (*domain.Wallet, error) {
@@ -82,7 +83,7 @@ func (r *PostgresRepo) GetWallet(userID string, tx *gorm.DB) (*domain.Wallet, er
 	} else {
 		db = r.db
 	}
-	if err := db.Where("id = ?", userID).First(&wallet).Error; err != nil {
+	if err := db.Where("user_id = ?", userID).First(&wallet).Error; err != nil {
 		return nil, err
 	}
 	return &wallet, nil
@@ -90,7 +91,7 @@ func (r *PostgresRepo) GetWallet(userID string, tx *gorm.DB) (*domain.Wallet, er
 
 func (r *PostgresRepo) UpdateWallet(w *domain.Wallet, tx *gorm.DB) (*domain.Wallet, error) {
 	var db *gorm.DB
-	var updated *domain.Wallet
+	var updated domain.Wallet
 
 	if tx != nil {
 		db = tx
@@ -98,11 +99,14 @@ func (r *PostgresRepo) UpdateWallet(w *domain.Wallet, tx *gorm.DB) (*domain.Wall
 		db = r.db
 	}
 	query := `
-	UPDATE wallets WHERE user_id = ? SET balance = ?
+	UPDATE wallets SET balance = ?
+	WHERE user_id = ?
 	RETURNING *
 	`
-	if err := db.Raw(query, w.UserID, w.Balance).Error; err != nil {
+
+	err := db.Raw(query, w.Balance, w.UserID).Scan(&updated).Error
+	if err != nil {
 		return nil, err
 	}
-	return updated, nil
+	return &updated, nil
 }

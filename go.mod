@@ -10,6 +10,8 @@ require (
 require github.com/lib/pq v1.1.1 // indirect
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/mux v1.8.1
 	github.com/jinzhu/inflection v1.0.0 // indirect
 )

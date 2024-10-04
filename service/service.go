@@ -1,8 +1,8 @@
 package service
 
 import (
-	"log"
 	"errors"
+	"log"
 	"pay-system/domain"
 	"pay-system/ports"
 
@@ -11,13 +11,17 @@ import (
 
 // wallet factory: main functions are CreateWallet and DebitWallet
 type WalletService struct {
-	repo ports.IRepository
-	db   *gorm.DB
+	repo            ports.IRepository
+	db              *gorm.DB
 	paymentProvider ports.IThirdPartyService
 }
 
-func NewWalletService(repo ports.IRepository) *WalletService {
-	return &WalletService{repo: repo}
+func NewWalletService(repo ports.IRepository, db *gorm.DB, provider ports.IThirdPartyService) *WalletService {
+	return &WalletService{
+		repo:            repo,
+		db:              db,
+		paymentProvider: provider,
+	}
 }
 
 func (s *WalletService) DebitWallet(payment *domain.Payment) (*domain.Wallet, error) {
@@ -34,17 +38,22 @@ func (s *WalletService) DebitWallet(payment *domain.Payment) (*domain.Wallet, er
 	}
 
 	// update wallet balance
-	wallet, err = s.repo.GetWallet(payment.UserID, tx)
+	wallet, err := s.repo.GetWallet(payment.UserID, tx)
 	if err != nil {
 		tx.Rollback()
-		log.Fatalf("failed to get wallet: %v", err)
+		return nil, err
 	}
 
 	wallet.Balance = wallet.Balance - int(payment.Amount)
+	if wallet.Balance < 0 {
+		tx.Rollback()
+		return nil, errors.New("insufficient balance")
+	}
+
 	updated, err := s.repo.UpdateWallet(wallet, tx)
 	if err != nil {
 		tx.Rollback()
-		log.Fatalf("failed to update wallet: %v", err)
+		return nil, err
 	}
 	log.Printf("wallet updated %v", updated)
 
@@ -53,9 +62,14 @@ func (s *WalletService) DebitWallet(payment *domain.Payment) (*domain.Wallet, er
 	updatedPayment, err := s.repo.UpdatePayment(payment, tx)
 	if err != nil {
 		tx.Rollback()
-		log.Fatalf("failed to update payment status: %v", err)
+		return nil, err
 	}
 	log.Printf("payment updated: %v", updatedPayment)
+
+	if err := tx.Commit().Error; err != nil {
+		log.Fatalf("failed to commit transaction: %v", err)
+		return nil, err
+	}
 
 	return wallet, nil
 }
@@ -75,17 +89,17 @@ func (s *WalletService) CreditWallet(payment *domain.Payment) (*domain.Wallet, e
 	}
 
 	// update wallet balance
-	wallet, err = s.repo.GetWallet(payment.UserID, tx)
+	wallet, err := s.repo.GetWallet(payment.UserID, tx)
 	if err != nil {
 		tx.Rollback()
-		log.Fatalf("failed to get wallet: %v", err)
+		return nil, err
 	}
 
 	wallet.Balance = wallet.Balance + int(payment.Amount)
 	updated, err := s.repo.UpdateWallet(wallet, tx)
 	if err != nil {
 		tx.Rollback()
-		log.Fatalf("failed to update wallet balance: %v", err)
+		return nil, err
 	}
 	log.Printf("wallet updated %v", updated)
 
@@ -94,29 +108,34 @@ func (s *WalletService) CreditWallet(payment *domain.Payment) (*domain.Wallet, e
 	updatedPayment, err := s.repo.UpdatePayment(payment, tx)
 	if err != nil {
 		tx.Rollback()
-		log.Fatalf("failed to update payment status: %v", err)
+		return nil, err
 	}
 	log.Printf("payment updated: %v", updatedPayment)
+
+	if err := tx.Commit().Error; err != nil {
+		log.Fatalf("failed to commit transaction: %v", err)
+		return nil, err
+	}
 
 	return wallet, nil
 }
 
 func (s *WalletService) HandleTransaction(dto *domain.PaymentDTO) (*domain.PaymentDTO, error) {
-	wallet, err := s.repo.GetWallet(dto.UserID, nil)
+	wallet, err := s.repo.GetWallet(dto.AccountID, nil)
 
 	if err != nil {
-		log.Println("Error getting wallet: %v". err)
+		log.Println("error getting user wallet")
 		return nil, err
 	}
 
-	if dto.Type == domain.PaymentTypeDebit && wallet.Balance - dto.Amount < 0 {
-		return nil, errors.New("Insufficient Balance")
+	if dto.Type == domain.PaymentTypeDebit && wallet.Balance-int(dto.Amount) < 0 {
+		return nil, errors.New("insufficient balance")
 	}
 	// transaction process
 	paymentData := &domain.Payment{
-		UserID: dto.UserID,
+		UserID: dto.AccountID,
 		Amount: dto.Amount,
-		Type: dto.Type
+		Type:   dto.Type,
 	}
 	// create a payment
 	payment, err := s.repo.CreatePayment(paymentData, nil)
@@ -124,7 +143,7 @@ func (s *WalletService) HandleTransaction(dto *domain.PaymentDTO) (*domain.Payme
 		return nil, err
 	}
 	log.Printf("payment created: %v", payment)
-	
+
 	// make request to third party
 	// ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	// defer cancel()
@@ -142,13 +161,13 @@ func (s *WalletService) HandleTransaction(dto *domain.PaymentDTO) (*domain.Payme
 
 	// if payment was successful to provider proceed to credit/debit wallet
 	if dto.Type == domain.PaymentTypeDebit {
-		_, err := s.repo.DebitWallet(payment)
+		_, err := s.DebitWallet(payment)
 		if err != nil {
 			log.Println("failed to debit wallet")
 			return nil, err
 		}
 	} else if dto.Type == domain.PaymentTypeCredit {
-		_, err := s.repo.CreditWallet(payment)
+		_, err := s.CreditWallet(payment)
 		if err != nil {
 			log.Println("failed to credit wallet")
 			return nil, err

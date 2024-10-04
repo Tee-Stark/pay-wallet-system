@@ -7,7 +7,6 @@ import (
 	"pay-system/ports"
 	"pay-system/providers"
 	"pay-system/repository"
-	"pay-system/scripts"
 	"pay-system/service"
 
 	"github.com/jinzhu/gorm"
@@ -44,23 +43,28 @@ func main() {
 	// Initialize repositories
 	repo := repository.NewPostgresRepo(db)
 
-	// Initialize services
-	walletService := service.NewWalletService(repo)
 	// initialize payment provider
 	starkPayProvider := providers.NewStarkPayProvider(config.STARK_PAY_API_KEY)
 	defer starkPayProvider.Server.Close()
 
+	// Initialize services
+	walletService := service.NewWalletService(repo, db, starkPayProvider)
+
 	// seed database
-	scripts.SeedUsers(db)
+	// scripts.SeedUsers(db)
 
 	// Initialize application
 	app := NewApp(db, starkPayProvider, walletService)
 
 	// Initialize routes
-	SetupRoutes(app)
+	r := SetupRoutes(app)
 
-	log.Println("Starting application server on port 3534")
-	if err := http.ListenAndServe(":3534", nil); err != nil {
-		log.Fatal(err)
+	// Create a server instance
+	server := &http.Server{
+		Addr:    ":3534",
+		Handler: r,
 	}
+
+	log.Println("Server started on port 3534")
+	log.Fatal(server.ListenAndServe())
 }

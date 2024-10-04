@@ -33,4 +33,5 @@ type PaymentDTO struct {
 	Reference string `json:"reference"`
 	AccountID string `json:"account_id"`
 	Amount    uint64 `json:"amount"`
+	Type      string    `json:"type"` // to track transaction type
 }

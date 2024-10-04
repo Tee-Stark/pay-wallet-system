@@ -2,6 +2,7 @@ package service
 
 import (
 	"log"
+	"errors"
 	"pay-system/domain"
 	"pay-system/ports"
 
@@ -12,6 +13,7 @@ import (
 type WalletService struct {
 	repo ports.IRepository
 	db   *gorm.DB
+	paymentProvider ports.IThirdPartyService
 }
 
 func NewWalletService(repo ports.IRepository) *WalletService {
@@ -30,14 +32,6 @@ func (s *WalletService) DebitWallet(payment *domain.Payment) (*domain.Wallet, er
 	if err := tx.Error; err != nil {
 		return nil, err
 	}
-
-	// create a payment
-	payment, err := s.repo.CreatePayment(payment, tx)
-	if err != nil {
-		tx.Rollback()
-		log.Fatalf("failed to create payment: %v", err)
-	}
-	log.Printf("payment created: %v", payment)
 
 	// update wallet balance
 	wallet, err = s.repo.GetWallet(payment.UserID, tx)
@@ -80,14 +74,6 @@ func (s *WalletService) CreditWallet(payment *domain.Payment) (*domain.Wallet, e
 		return nil, err
 	}
 
-	// create a payment
-	payment, err := s.repo.CreatePayment(payment, tx)
-	if err != nil {
-		tx.Rollback()
-		log.Fatalf("failed to create payment: %v", err)
-	}
-	log.Printf("payment created: %v", payment)
-
 	// update wallet balance
 	wallet, err = s.repo.GetWallet(payment.UserID, tx)
 	if err != nil {
@@ -113,4 +99,40 @@ func (s *WalletService) CreditWallet(payment *domain.Payment) (*domain.Wallet, e
 	log.Printf("payment updated: %v", updatedPayment)
 
 	return wallet, nil
+}
+
+func (s *WalletService) HandleTransaction(dto *domain.PaymentDTO) (bool, error) {
+	wallet, err := s.repo.GetWallet(dto.UserID, nil)
+	success := false
+
+	if err != nil {
+		log.Println("Error getting wallet: %v". err)
+		return success, err
+	}
+
+	if dto.Type == domain.PaymentTypeDebit && wallet.Balance - dto.Amount < 0 {
+		return success, errors.New("Insufficient Balance")
+	}
+	// transaction process
+	paymentData := &domain.Payment{
+		UserID: dto.UserID,
+		Amount: dto.Amount,
+		Type: dto.Type
+	}
+	// create a payment
+	payment, err := s.repo.CreatePayment(payment, nil)
+	if err != nil {
+		return success, err
+	}
+	log.Printf("payment created: %v", payment)
+	
+	// make request to third party
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	s.paymentProvider.MakePayment(payment)
+
+
+
+	success = true
+	return success, nil
 }

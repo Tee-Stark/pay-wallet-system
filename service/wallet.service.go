@@ -101,17 +101,16 @@ func (s *WalletService) CreditWallet(payment *domain.Payment) (*domain.Wallet, e
 	return wallet, nil
 }
 
-func (s *WalletService) HandleTransaction(dto *domain.PaymentDTO) (bool, error) {
+func (s *WalletService) HandleTransaction(dto *domain.PaymentDTO) (*domain.PaymentDTO, error) {
 	wallet, err := s.repo.GetWallet(dto.UserID, nil)
-	success := false
 
 	if err != nil {
 		log.Println("Error getting wallet: %v". err)
-		return success, err
+		return nil, err
 	}
 
 	if dto.Type == domain.PaymentTypeDebit && wallet.Balance - dto.Amount < 0 {
-		return success, errors.New("Insufficient Balance")
+		return nil, errors.New("Insufficient Balance")
 	}
 	// transaction process
 	paymentData := &domain.Payment{
@@ -120,19 +119,41 @@ func (s *WalletService) HandleTransaction(dto *domain.PaymentDTO) (bool, error) 
 		Type: dto.Type
 	}
 	// create a payment
-	payment, err := s.repo.CreatePayment(payment, nil)
+	payment, err := s.repo.CreatePayment(paymentData, nil)
 	if err != nil {
-		return success, err
+		return nil, err
 	}
 	log.Printf("payment created: %v", payment)
 	
 	// make request to third party
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	s.paymentProvider.MakePayment(payment)
+	// ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// defer cancel()
+	resp, err := s.paymentProvider.MakePayment(payment)
+	if err != nil {
+		// update payment status to failed
+		payment.Status = domain.PaymentStatusFailed
+		_, err = s.repo.UpdatePayment(payment, nil)
+		if err != nil {
+			log.Println("error updating payment status")
+			return nil, err
+		}
+		return nil, err
+	}
 
+	// if payment was successful to provider proceed to credit/debit wallet
+	if dto.Type == domain.PaymentTypeDebit {
+		_, err := s.repo.DebitWallet(payment)
+		if err != nil {
+			log.Println("failed to debit wallet")
+			return nil, err
+		}
+	} else if dto.Type == domain.PaymentTypeCredit {
+		_, err := s.repo.CreditWallet(payment)
+		if err != nil {
+			log.Println("failed to credit wallet")
+			return nil, err
+		}
+	}
 
-
-	success = true
-	return success, nil
+	return resp, nil
 }

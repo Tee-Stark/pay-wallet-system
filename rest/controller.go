@@ -38,5 +38,4 @@ func (c *WalletCtrl) HandleTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.HandleResponse(w, http.StatusOK, resp)
-
 }
